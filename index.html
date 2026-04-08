@@ -114,7 +114,7 @@ const M={
   "정혜정":{team:"인사총무팀",rank:"대리",ext:"5327",email:"hyejeong.jeong"},
   "장효주":{team:"인사총무팀",rank:"대리",ext:"5321",email:"hjj"},
   "장수진":{team:"인사총무팀",rank:"사원",ext:"5325",email:"sjjang"},
-  "한효수":{team:"인사총무팀",rank:"과장",ext:"5323",email:"hshan"},
+  "한효수":{team:"인사총무팀",rank:"과장",ext:"5323",email:"hshan",sub:"EA파트"},
   "여동재":{team:"경영기획팀",rank:"팀장",ext:"5342",email:"djyeo"},
   "김소이":{team:"경영기획팀",rank:"대리",ext:"5411",email:"soyee.kim"},
   "김세진":{team:"경영기획팀",rank:"대리",ext:"5316",email:"sejin.kim"},
@@ -182,6 +182,7 @@ function mkCell(name,w){
     <div class="cr" style="color:${C.t};">${m.rank}</div>
     <div class="cn" style="color:${C.t};">${name}</div>
     <div class="ce" style="color:${C.t};">${m.ext&&m.ext!=="-"?m.ext:""}</div>
+    ${m.sub?`<div style="font-size:8px;font-weight:600;color:${C.t};opacity:0.7;margin-top:1px;">${m.sub}</div>`:""}
   </div>`;
 }
 function mkHead(name,w){
@@ -325,7 +326,7 @@ function showModal(name){
   document.getElementById("mc").innerHTML=`
     <div class="m-head">
       ${avatar}
-      <div><div class="m-name">${name}</div><div class="m-sub">${m.team} · ${m.rank}</div>${guestNote}</div>
+      <div><div class="m-name">${name}</div><div class="m-sub">${m.team}${m.sub?" / "+m.sub:""} · ${m.rank}</div>${guestNote}</div>
     </div>
     <div class="m-div"></div>
     <div class="m-row"><div class="m-lbl">내선</div><div class="m-val">${extFull}</div></div>
@@ -478,30 +479,7 @@ function pwSubmit(){
   }
 }
 
-function enterAdmin(){
-  isAdmin = true;
-  document.body.classList.add("edit-mode");
-  document.getElementById("adminBtn").textContent = "🔓";
-  document.getElementById("adminBtn").classList.add("active");
-  document.getElementById("editBanner").classList.add("on");
-  document.getElementById("dlBtn").classList.add("on");
-  // 셀에 편집 이벤트 추가
-  document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
-    el.addEventListener("click", adminCellClick, true);
-  });
-}
 
-function exitAdmin(){
-  isAdmin = false;
-  document.body.classList.remove("edit-mode");
-  document.getElementById("adminBtn").textContent = "🔒";
-  document.getElementById("adminBtn").classList.remove("active");
-  document.getElementById("editBanner").classList.remove("on");
-  document.getElementById("dlBtn").classList.remove("on");
-  document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
-    el.removeEventListener("click", adminCellClick, true);
-  });
-}
 
 function adminCellClick(e){
   if(!isAdmin) return;
@@ -583,18 +561,498 @@ function rebuildLayout(){
 }
 
 function downloadHTML(){
-  // 현재 M 데이터를 HTML에 반영하여 다운로드
   const mJson = JSON.stringify(M, null, 0);
+  const pJson = JSON.stringify(PHOTOS, null, 0);
   let html = document.documentElement.outerHTML;
-  // M 객체 교체 (const M={...}; 패턴)
   html = html.replace(/const M=\{[\s\S]*?\};/, "const M=" + mJson + ";");
+  html = html.replace(/const PHOTOS=\{[\s\S]*?\};/, "const PHOTOS=" + pJson + ";");
   const blob = new Blob([html], {type:"text/html;charset=utf-8"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "유한건강생활_자리배치도.html";
   a.click();
 }
+
+// ── 자리 이동 (드래그 앤 드롭 + 클릭 교환) ──
+let dragSrcEl = null;   // 드래그 중인 셀
+let swapSrcEl = null;   // 클릭 선택된 셀 (첫번째 클릭)
+
+// 셀에 드래그 기능 부여
+function enableSeatMove(){
+  document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
+    const name = el.dataset.n; if(!name) return;
+    // 관리자 or 본인 셀만 드래그 가능
+    el.draggable = true;
+    el.addEventListener("dragstart", onDragStart);
+    el.addEventListener("dragover",  onDragOver);
+    el.addEventListener("drop",      onDrop);
+    el.addEventListener("dragend",   onDragEnd);
+    el.addEventListener("click",     onSwapClick);
+  });
+  // 공석 셀도 drop 가능
+  document.querySelectorAll(".vcell").forEach(el=>{
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("drop",     onDrop);
+    el.addEventListener("click",    onSwapClick);
+  });
+}
+
+function canMove(name){
+  // 관리자면 모두 이동 가능, 아니면 현재 사용자 이름과 일치하는 셀만
+  if(isAdmin) return true;
+  // 일반 모드: 클릭해서 자기 이름 입력 후 확인
+  return true; // 아래 onSwapClick에서 본인 확인
+}
+
+function onDragStart(e){
+  dragSrcEl = this;
+  this.style.opacity = "0.4";
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", this.dataset.n || "");
+}
+function onDragOver(e){
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  this.style.outline = "2px dashed #2563eb";
+}
+function onDrop(e){
+  e.preventDefault();
+  this.style.outline = "";
+  if(!dragSrcEl || dragSrcEl === this) return;
+  swapCells(dragSrcEl, this);
+  dragSrcEl = null;
+}
+function onDragEnd(){
+  this.style.opacity = "";
+  document.querySelectorAll("[style*='outline']").forEach(el=>el.style.outline="");
+  dragSrcEl = null;
+}
+
+// 클릭 교환
+function onSwapClick(e){
+  if(isAdmin) return; // 관리자 모드에서는 편집 클릭이 우선
+  const name = this.dataset.n;
+
+  // 본인 확인 (일반 모드 첫 클릭 시)
+  if(!swapSrcEl){
+    if(!name){ alert("공석은 출발지로 선택할 수 없습니다."); return; }
+    const input = prompt(`본인 이름을 입력하세요 (이동할 사람: ${name})`);
+    if(!input) return;
+    if(input.trim() !== name){
+      alert("이름이 일치하지 않습니다.");
+      return;
+    }
+    swapSrcEl = this;
+    this.style.outline = "2.5px solid #2563eb";
+    this.style.outlineOffset = "1px";
+    showToast("이동할 자리를 클릭해주세요");
+    return;
+  }
+
+  // 두 번째 클릭 — 교환
+  if(swapSrcEl === this){
+    swapSrcEl.style.outline = "";
+    swapSrcEl = null;
+    return;
+  }
+  swapCells(swapSrcEl, this);
+  swapSrcEl.style.outline = "";
+  swapSrcEl = null;
+}
+
+function swapCells(a, b){
+  // innerHTML + dataset 교환
+  const aName = a.dataset.n || null;
+  const bName = b.dataset.n || null;
+  const aHTML = a.innerHTML;
+  const bHTML = b.innerHTML;
+  const aClass = a.className;
+  const bClass = b.className;
+  const aStyle = a.getAttribute("style") || "";
+  const bStyle = b.getAttribute("style") || "";
+
+  // a ← b 내용
+  a.innerHTML = bHTML;
+  a.dataset.n = bName || "";
+  if(!bName){ a.className = "vcell"; a.setAttribute("style", bStyle); }
+  else { a.className = aClass; a.setAttribute("style", bStyle); a.dataset.n = bName; }
+
+  // b ← a 내용
+  b.innerHTML = aHTML;
+  b.dataset.n = aName || "";
+  if(!aName){ b.className = "vcell"; b.setAttribute("style", aStyle); }
+  else { b.className = bClass; b.setAttribute("style", aStyle); b.dataset.n = aName; }
+
+  // 이벤트 재등록
+  enableSeatMove();
+  if(isAdmin){
+    document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
+      el.removeEventListener("click", adminCellClick, true);
+      el.addEventListener("click", adminCellClick, true);
+    });
+  }
+  showToast("✅ 자리가 변경되었습니다");
+}
+
+function showToast(msg){
+  let t = document.getElementById("seatToast");
+  if(!t){
+    t = document.createElement("div");
+    t.id = "seatToast";
+    t.style.cssText = "position:fixed;bottom:160px;right:20px;background:#1a2332;color:#fff;font-size:12px;font-weight:600;padding:8px 16px;border-radius:20px;z-index:400;opacity:0;transition:opacity .3s;pointer-events:none;";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.style.opacity="0", 2200);
+}
+
+// 페이지 로드 후 드래그 활성화
+document.addEventListener("DOMContentLoaded", ()=>{ enableSeatMove(); });
+setTimeout(()=>{ enableSeatMove(); }, 800);
+
+// ── 팀명 수정 ──
+(function(){
+  const btn = document.createElement("button");
+  btn.id = "editTeamBtn";
+  btn.title = "팀명 수정";
+  btn.textContent = "🏷️";
+  btn.style.cssText = "position:fixed;bottom:162px;right:20px;width:42px;height:42px;border-radius:50%;background:#7c5cbf;border:none;cursor:pointer;display:none;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 12px rgba(0,0,0,0.25);z-index:300;";
+  btn.onclick = openTeamModal;
+  document.body.appendChild(btn);
+})();
+
+// enterAdmin / exitAdmin에 팀명 버튼 show/hide 추가
+const _origEnter = enterAdmin;
+// 이미 정의된 enterAdmin에 추가
+const _origExit = exitAdmin;
+
+// 팀명 수정 모달 열기
+function openTeamModal(){
+  const tbody = document.getElementById("teamTableBody");
+  tbody.innerHTML = "";
+  // TC 기준으로 팀 목록 렌더
+  Object.keys(TC).forEach(teamName=>{
+    if(teamName === "비서") return; // 내부용 제외
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="padding:5px 6px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="width:10px;height:10px;border-radius:2px;background:${TC[teamName].h};flex-shrink:0;"></div>
+          <span style="font-size:12px;color:#555;">${teamName}</span>
+        </div>
+      </td>
+      <td style="padding:5px 6px;">
+        <input class="em-input" data-old="${teamName}" value="${teamName}" style="width:100%;font-size:12px;padding:5px 8px;">
+      </td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById("teamModalBg").classList.add("open");
+}
+function closeTeamModal(){ document.getElementById("teamModalBg").classList.remove("open"); }
+
+function saveTeamNames(){
+  const inputs = document.querySelectorAll("#teamTableBody input");
+  const renames = []; // [{old, new}]
+  inputs.forEach(inp=>{
+    const oldName = inp.dataset.old;
+    const newName = inp.value.trim();
+    if(newName && newName !== oldName) renames.push({old: oldName, new: newName});
+  });
+
+  if(renames.length === 0){ closeTeamModal(); return; }
+
+  renames.forEach(({old: o, new: n})=>{
+    // 1. TC 업데이트
+    if(TC[o]){ TC[n] = TC[o]; delete TC[o]; }
+
+    // 2. M 전체 구성원 team 업데이트
+    Object.keys(M).forEach(name=>{
+      if(M[name].team === o) M[name].team = n;
+      if(M[name].guest === o) M[name].guest = n;
+    });
+
+    // 3. 셀 헤더 텍스트 업데이트 (.zh)
+    document.querySelectorAll(".zh").forEach(zh=>{
+      if(zh.textContent.trim() === o) zh.textContent = n;
+    });
+
+    // 4. 레전드 업데이트
+    document.querySelectorAll(".leg").forEach(leg=>{
+      if(leg.textContent.trim() === o) leg.lastChild.textContent = n;
+    });
+
+    // 5. select 옵션 업데이트 (추가/수정 모달)
+    document.querySelectorAll("select option").forEach(opt=>{
+      if(opt.value === o || opt.textContent === o){
+        opt.value = n;
+        opt.textContent = n;
+      }
+    });
+  });
+
+  // 6. 셀 색상 재적용
+  document.querySelectorAll("[data-n]").forEach(el=>{
+    const name = el.dataset.n;
+    const m = M[name]; if(!m) return;
+    const C = tc(name);
+    el.style.background = C.bg || C.h;
+    el.style.borderColor = C.b;
+    el.querySelectorAll("[style*='color']").forEach(t=>{ if(t.style.color) t.style.color = C.t; });
+  });
+
+  showToast(`✅ ${renames.length}개 팀명이 변경되었습니다`);
+  closeTeamModal();
+}
+
+// enterAdmin 오버라이드해서 팀명 버튼 표시
+const _prevEnterAdmin = enterAdmin;
+enterAdmin = function(){
+  _prevEnterAdmin();
+  document.getElementById("editTeamBtn").style.display = "flex";
+};
+const _prevExitAdmin = exitAdmin;
+exitAdmin = function(){
+  _prevExitAdmin();
+  document.getElementById("editTeamBtn").style.display = "none";
+};
+
+// ── 신규 인원 추가 모달 ──
+let addPhotoB64 = null;
+
+document.getElementById("adminBtn").addEventListener("contextmenu", function(e){
+  if(!isAdmin) return;
+  e.preventDefault();
+  openAddModal();
+});
+
+// 추가 버튼도 별도로 만들기
+(function(){
+  const btn = document.createElement("button");
+  btn.id = "addMemberBtn";
+  btn.title = "신규 구성원 추가";
+  btn.textContent = "➕";
+  btn.style.cssText = "position:fixed;bottom:116px;right:20px;width:42px;height:42px;border-radius:50%;background:#2d9e6e;border:none;cursor:pointer;display:none;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 12px rgba(0,0,0,0.25);z-index:300;";
+  btn.onclick = openAddModal;
+  document.body.appendChild(btn);
+})();
+
+function enterAdmin(){
+  isAdmin = true;
+  document.body.classList.add("edit-mode");
+  document.getElementById("adminBtn").textContent = "🔓";
+  document.getElementById("adminBtn").classList.add("active");
+  document.getElementById("editBanner").classList.add("on");
+  document.getElementById("dlBtn").classList.add("on");
+  document.getElementById("addMemberBtn").style.display = "flex";
+  document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
+    el.addEventListener("click", adminCellClick, true);
+  });
+}
+
+function exitAdmin(){
+  isAdmin = false;
+  document.body.classList.remove("edit-mode");
+  document.getElementById("adminBtn").textContent = "🔒";
+  document.getElementById("adminBtn").classList.remove("active");
+  document.getElementById("editBanner").classList.remove("on");
+  document.getElementById("dlBtn").classList.remove("on");
+  document.getElementById("addMemberBtn").style.display = "none";
+  document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
+    el.removeEventListener("click", adminCellClick, true);
+  });
+}
+
+function openAddModal(){
+  addPhotoB64 = null;
+  document.getElementById("addName").value = "";
+  document.getElementById("addRank").value = "";
+  document.getElementById("addTeam").selectedIndex = 0;
+  document.getElementById("addExt").value = "";
+  document.getElementById("addEmail").value = "";
+  document.getElementById("addPlacement").value = "vacant";
+  document.getElementById("addPhotoPreview").style.display = "none";
+  document.getElementById("addPhotoLabel").textContent = "사진 파일 선택 (JPG/PNG)";
+  document.getElementById("addBg").classList.add("open");
+  document.getElementById("addName").focus();
+}
+function closeAddModal(){ document.getElementById("addBg").classList.remove("open"); }
+
+function addPhotoChange(e){
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    addPhotoB64 = ev.target.result;
+    document.getElementById("addPhotoPreview").src = addPhotoB64;
+    document.getElementById("addPhotoPreview").style.display = "block";
+    document.getElementById("addPhotoLabel").textContent = file.name;
+  };
+  reader.readAsDataURL(file);
+}
+
+function addMemberSave(){
+  const name = document.getElementById("addName").value.trim();
+  const rank = document.getElementById("addRank").value.trim();
+  const team = document.getElementById("addTeam").value;
+  const ext  = document.getElementById("addExt").value.trim() || "-";
+  const email= document.getElementById("addEmail").value.trim();
+  const placement = document.getElementById("addPlacement").value;
+
+  if(!name || !rank || !team){
+    alert("이름, 직급, 소속팀은 필수입니다."); return;
+  }
+  if(M[name]){ alert("이미 존재하는 이름입니다."); return; }
+
+  M[name] = {team, rank, ext, email};
+  if(addPhotoB64) PHOTOS[name] = addPhotoB64;
+
+  closeAddModal();
+
+  if(placement === "vacant"){
+    // 공석 자리 중 해당 팀과 같은 zone의 첫 번째 vcell에 배치
+    const vcells = document.querySelectorAll(".vcell");
+    let placed = false;
+    for(const vc of vcells){
+      // 같은 zone 안에 같은 팀 셀이 있는지 확인
+      const zone = vc.closest(".zone") || vc.closest(".floor-row");
+      const siblings = zone ? zone.querySelectorAll("[data-n]") : [];
+      let teamMatch = false;
+      siblings.forEach(s => { if(M[s.dataset.n]?.team === team) teamMatch = true; });
+      if(teamMatch){
+        // vcell을 새 셀로 교체
+        const C = tc(name);
+        const newCell = document.createElement("div");
+        newCell.className = "c";
+        newCell.dataset.n = name;
+        newCell.style.cssText = `background:${C.bg};border-color:${C.b};min-width:58px;`;
+        newCell.innerHTML = `<div class="cr" style="color:${C.t};">${rank}</div><div class="cn" style="color:${C.t};">${name}</div><div class="ce" style="color:${C.t};">${ext!=="-"?ext:""}</div>`;
+        newCell.addEventListener("click", adminCellClick, true);
+        vc.replaceWith(newCell);
+        placed = true;
+        break;
+      }
+    }
+    if(!placed){
+      alert(`${team} 구역에 공석이 없습니다.\n팀 맨 마지막에 추가합니다.`);
+      appendToTeam(name, team);
+    }
+  } else {
+    appendToTeam(name, team);
+  }
+
+  rebuildLayout();
+  // 새 셀 편집 이벤트 등록
+  document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
+    el.removeEventListener("click", adminCellClick, true);
+    el.addEventListener("click", adminCellClick, true);
+  });
+}
+
+function appendToTeam(name, team){
+  // 해당 팀 zone의 마지막 .crow에 추가
+  const allZones = document.querySelectorAll(".zone");
+  let targetZone = null;
+  allZones.forEach(z=>{
+    const cells = z.querySelectorAll("[data-n]");
+    cells.forEach(c=>{ if(M[c.dataset.n]?.team === team) targetZone = z; });
+  });
+  if(!targetZone){ alert("해당 팀 구역을 찾을 수 없습니다."); return; }
+
+  const C = tc(name);
+  const m = M[name];
+  const newCell = document.createElement("div");
+  newCell.className = "c";
+  newCell.dataset.n = name;
+  newCell.style.cssText = `background:${C.bg};border-color:${C.b};min-width:58px;`;
+  newCell.innerHTML = `<div class="cr" style="color:${C.t};">${m.rank}</div><div class="cn" style="color:${C.t};">${name}</div><div class="ce" style="color:${C.t};">${m.ext!=="-"?m.ext:""}</div>`;
+  newCell.addEventListener("click", adminCellClick, true);
+
+  // 마지막 crow에 추가하거나 새 crow 생성
+  const rows = targetZone.querySelectorAll(".crow");
+  const lastRow = rows[rows.length-1];
+  if(lastRow && lastRow.children.length < 3){
+    lastRow.appendChild(newCell);
+  } else {
+    const newRow = document.createElement("div");
+    newRow.className = "crow";
+    newRow.appendChild(newCell);
+    const zb = targetZone.querySelector(".zb");
+    if(zb) zb.appendChild(newRow);
+  }
+}
 </script>
+
+<!-- 신규 추가 모달 -->
+<style>
+#addBg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:700;align-items:center;justify-content:center;}
+#addBg.open{display:flex;}
+.add-modal{background:#fff;border-radius:14px;padding:22px 22px 18px;width:360px;position:relative;box-shadow:0 12px 40px rgba(0,0,0,0.15);max-height:90vh;overflow-y:auto;}
+.add-modal .em-title{display:flex;align-items:center;gap:8px;}
+.photo-upload-area{border:1.5px dashed #ddd;border-radius:8px;padding:12px;text-align:center;cursor:pointer;margin-bottom:4px;transition:border-color .2s;}
+.photo-upload-area:hover{border-color:#1a2332;}
+#addPhotoPreview{width:60px;height:60px;border-radius:50%;object-fit:cover;object-position:top;margin-bottom:6px;display:none;}
+#addPhotoLabel{font-size:11px;color:#aaa;}
+</style>
+<div id="addBg">
+  <div class="add-modal">
+    <button class="em-x" onclick="closeAddModal()">✕</button>
+    <div class="em-title" style="font-size:14px;font-weight:700;color:#111;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #f0f0ee;">➕ 신규 구성원 추가</div>
+    <div class="em-row"><div class="em-label">이름 *</div><input class="em-input" id="addName" placeholder="예: 홍길동"></div>
+    <div class="em-row"><div class="em-label">직급 *</div><input class="em-input" id="addRank" placeholder="예: 대리"></div>
+    <div class="em-row"><div class="em-label">소속팀 *</div>
+      <select class="em-select" id="addTeam">
+        <option>인사총무팀</option><option>경영기획팀</option><option>경영운영팀</option>
+        <option>브랜드2팀</option><option>브랜드1팀</option><option>파트너팀</option>
+        <option>WISE팀</option><option>사업화전략팀</option>
+        <option>대표이사</option><option>성장기획부문</option><option>성장동력부문</option>
+      </select>
+    </div>
+    <div class="em-row"><div class="em-label">내선번호</div><input class="em-input" id="addExt" placeholder="예: 5324"></div>
+    <div class="em-row"><div class="em-label">이메일 ID (@yuhancare.com 앞부분)</div><input class="em-input" id="addEmail" placeholder="예: gildong.hong"></div>
+    <div class="em-row"><div class="em-label">자리 배치 방식</div>
+      <select class="em-select" id="addPlacement">
+        <option value="vacant">해당 팀 공석 자리에 자동 배치</option>
+        <option value="append">해당 팀 맨 마지막에 추가</option>
+      </select>
+    </div>
+    <div class="em-row"><div class="em-label">증명사진 (선택)</div>
+      <div class="photo-upload-area" onclick="document.getElementById('addPhotoFile').click()">
+        <img id="addPhotoPreview" alt="미리보기">
+        <div id="addPhotoLabel">사진 파일 선택 (JPG/PNG)</div>
+      </div>
+      <input type="file" id="addPhotoFile" accept="image/*" style="display:none" onchange="addPhotoChange(this)">
+    </div>
+    <div class="em-btns">
+      <button class="em-cancel" onclick="closeAddModal()">취소</button>
+      <button class="em-save" onclick="addMemberSave()">추가</button>
+    </div>
+  </div>
+</div>
+
+<!-- 팀명 수정 모달 -->
+<style>
+#teamModalBg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:700;align-items:center;justify-content:center;}
+#teamModalBg.open{display:flex;}
+.team-modal{background:#fff;border-radius:14px;padding:22px 22px 18px;width:380px;position:relative;box-shadow:0 12px 40px rgba(0,0,0,0.15);max-height:85vh;overflow-y:auto;}
+.team-modal table{width:100%;border-collapse:collapse;}
+.team-modal th{font-size:11px;color:#aaa;font-weight:500;padding:4px 6px;border-bottom:1px solid #f0f0ee;text-align:left;}
+</style>
+<div id="teamModalBg">
+  <div class="team-modal">
+    <button class="em-x" onclick="closeTeamModal()">✕</button>
+    <div style="font-size:14px;font-weight:700;color:#111;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #f0f0ee;">🏷️ 팀명 수정</div>
+    <p style="font-size:11px;color:#aaa;margin-bottom:12px;">팀명을 변경하면 소속 구성원·헤더·레전드에 모두 자동 반영됩니다.</p>
+    <table>
+      <thead><tr><th>현재 팀명</th><th>변경할 팀명</th></tr></thead>
+      <tbody id="teamTableBody"></tbody>
+    </table>
+    <div class="em-btns" style="margin-top:16px;">
+      <button class="em-cancel" onclick="closeTeamModal()">취소</button>
+      <button class="em-save" onclick="saveTeamNames()">저장</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
