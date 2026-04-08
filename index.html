@@ -486,6 +486,24 @@ function adminCellClick(e){
   e.stopImmediatePropagation();
   const name = this.dataset.n;
   if(!name || !M[name]) return;
+
+  // 자리 이동 모드
+  if(isMoveMode){
+    if(!swapSrcEl){
+      swapSrcEl = this;
+      this.style.outline = "2.5px solid #e05555";
+      this.style.outlineOffset = "1px";
+      showToast("이동할 자리를 클릭해주세요");
+    } else {
+      if(swapSrcEl === this){ swapSrcEl.style.outline=""; swapSrcEl=null; return; }
+      swapCells(swapSrcEl, this);
+      swapSrcEl.style.outline="";
+      swapSrcEl=null;
+    }
+    return;
+  }
+
+  // 편집 모드
   editingName = name;
   const m = M[name];
   document.getElementById("emTitle").textContent = `✏️ ${name} 수정`;
@@ -597,25 +615,21 @@ function enableSeatMove(){
   });
 }
 
-function canMove(name){
-  // 관리자면 모두 이동 가능, 아니면 현재 사용자 이름과 일치하는 셀만
-  if(isAdmin) return true;
-  // 일반 모드: 클릭해서 자기 이름 입력 후 확인
-  return true; // 아래 onSwapClick에서 본인 확인
-}
-
 function onDragStart(e){
+  if(!isAdmin){ e.preventDefault(); return; }
   dragSrcEl = this;
   this.style.opacity = "0.4";
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", this.dataset.n || "");
 }
 function onDragOver(e){
+  if(!isAdmin) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = "move";
   this.style.outline = "2px dashed #2563eb";
 }
 function onDrop(e){
+  if(!isAdmin) return;
   e.preventDefault();
   this.style.outline = "";
   if(!dragSrcEl || dragSrcEl === this) return;
@@ -628,28 +642,12 @@ function onDragEnd(){
   dragSrcEl = null;
 }
 
-// 클릭 교환
+// 클릭 교환 (관리자 전용)
 function onSwapClick(e){
-  if(isAdmin) return; // 관리자 모드에서는 편집 클릭이 우선
-  const name = this.dataset.n;
-
-  // 본인 확인 (일반 모드 첫 클릭 시)
-  if(!swapSrcEl){
-    if(!name){ alert("공석은 출발지로 선택할 수 없습니다."); return; }
-    const input = prompt(`본인 이름을 입력하세요 (이동할 사람: ${name})`);
-    if(!input) return;
-    if(input.trim() !== name){
-      alert("이름이 일치하지 않습니다.");
-      return;
-    }
-    swapSrcEl = this;
-    this.style.outline = "2.5px solid #2563eb";
-    this.style.outlineOffset = "1px";
-    showToast("이동할 자리를 클릭해주세요");
-    return;
-  }
-
-  // 두 번째 클릭 — 교환
+  if(!isAdmin) return;
+  // 관리자 편집 클릭(정보수정)과 충돌하지 않게 — 편집은 adminCellClick이 처리
+  // 여기선 두 번째 클릭(이동 대상 지정)만 담당
+  if(!swapSrcEl) return; // 첫 클릭은 adminCellClick에서 처리
   if(swapSrcEl === this){
     swapSrcEl.style.outline = "";
     swapSrcEl = null;
@@ -712,7 +710,37 @@ function showToast(msg){
 document.addEventListener("DOMContentLoaded", ()=>{ enableSeatMove(); });
 setTimeout(()=>{ enableSeatMove(); }, 800);
 
-// ── 팀명 수정 ──
+// 관리자 모드 — 이동 모드 토글 버튼
+(function(){
+  const btn = document.createElement("button");
+  btn.id = "moveModeBtn";
+  btn.title = "자리 이동 모드";
+  btn.textContent = "↔️";
+  btn.style.cssText = "position:fixed;bottom:208px;right:20px;width:42px;height:42px;border-radius:50%;background:#e07c2d;border:none;cursor:pointer;display:none;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 12px rgba(0,0,0,0.25);z-index:300;";
+  btn.onclick = toggleMoveMode;
+  document.body.appendChild(btn);
+})();
+
+let isMoveMode = false;
+
+function toggleMoveMode(){
+  isMoveMode = !isMoveMode;
+  const btn = document.getElementById("moveModeBtn");
+  if(isMoveMode){
+    btn.style.background = "#c0392b";
+    showToast("↔️ 자리 이동 모드 — 셀을 드래그하거나 클릭해서 이동하세요");
+    document.getElementById("editBanner").textContent = "↔️ 자리 이동 모드 — 셀을 드래그하거나 첫 번째 셀 클릭 후 이동할 자리 클릭";
+  } else {
+    btn.style.background = "#e07c2d";
+    swapSrcEl = null;
+    document.querySelectorAll("[style*='outline']").forEach(el=>el.style.outline="");
+    showToast("✏️ 편집 모드로 전환");
+    document.getElementById("editBanner").textContent = "✏️ 관리자 편집 모드 — 셀을 클릭하면 수정할 수 있습니다";
+  }
+}
+
+// adminCellClick: 이동 모드면 swap, 아니면 정보 수정
+const _origAdminCellClick = adminCellClick;
 (function(){
   const btn = document.createElement("button");
   btn.id = "editTeamBtn";
@@ -846,6 +874,7 @@ function enterAdmin(){
   document.getElementById("editBanner").classList.add("on");
   document.getElementById("dlBtn").classList.add("on");
   document.getElementById("addMemberBtn").style.display = "flex";
+  document.getElementById("moveModeBtn").style.display = "flex";
   document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
     el.addEventListener("click", adminCellClick, true);
   });
@@ -859,6 +888,8 @@ function exitAdmin(){
   document.getElementById("editBanner").classList.remove("on");
   document.getElementById("dlBtn").classList.remove("on");
   document.getElementById("addMemberBtn").style.display = "none";
+  document.getElementById("moveModeBtn").style.display = "none";
+  isMoveMode = false;
   document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
     el.removeEventListener("click", adminCellClick, true);
   });
