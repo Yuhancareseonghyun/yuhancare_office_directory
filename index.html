@@ -482,7 +482,12 @@ function pwSubmit(){
 
 
 function adminCellClick(e){
-  if(!isAdmin) return;
+  if(!isAdmin){
+    // 일반 모드: 정보 팝업
+    const name = this.dataset.n;
+    if(name && M[name]) showModal(name);
+    return;
+  }
   e.stopImmediatePropagation();
   const name = this.dataset.n;
   if(!name || !M[name]) return;
@@ -599,16 +604,24 @@ let swapSrcEl = null;   // 클릭 선택된 셀 (첫번째 클릭)
 function enableSeatMove(){
   document.querySelectorAll(".c:not(.empty),.hc,.hc-ceo").forEach(el=>{
     const name = el.dataset.n; if(!name) return;
-    // 관리자 or 본인 셀만 드래그 가능
     el.draggable = true;
+    // 중복 등록 방지
+    el.removeEventListener("dragstart", onDragStart);
+    el.removeEventListener("dragover",  onDragOver);
+    el.removeEventListener("drop",      onDrop);
+    el.removeEventListener("dragend",   onDragEnd);
+    el.removeEventListener("click",     adminCellClick);
     el.addEventListener("dragstart", onDragStart);
     el.addEventListener("dragover",  onDragOver);
     el.addEventListener("drop",      onDrop);
     el.addEventListener("dragend",   onDragEnd);
-    el.addEventListener("click",     onSwapClick);
+    el.addEventListener("click",     adminCellClick);
   });
-  // 공석 셀도 drop 가능
+  // 공석 셀도 drop + click 가능
   document.querySelectorAll(".vcell").forEach(el=>{
+    el.removeEventListener("dragover", onDragOver);
+    el.removeEventListener("drop",     onDrop);
+    el.removeEventListener("click",    onSwapClick);
     el.addEventListener("dragover", onDragOver);
     el.addEventListener("drop",     onDrop);
     el.addEventListener("click",    onSwapClick);
@@ -659,27 +672,40 @@ function onSwapClick(e){
 }
 
 function swapCells(a, b){
-  // innerHTML + dataset 교환
   const aName = a.dataset.n || null;
   const bName = b.dataset.n || null;
-  const aHTML = a.innerHTML;
-  const bHTML = b.innerHTML;
-  const aClass = a.className;
-  const bClass = b.className;
-  const aStyle = a.getAttribute("style") || "";
-  const bStyle = b.getAttribute("style") || "";
+  const aIsHead = a.classList.contains("hc") || a.classList.contains("hc-ceo");
+  const bIsHead = b.classList.contains("hc") || b.classList.contains("hc-ceo");
 
-  // a ← b 내용
-  a.innerHTML = bHTML;
-  a.dataset.n = bName || "";
-  if(!bName){ a.className = "vcell"; a.setAttribute("style", bStyle); }
-  else { a.className = aClass; a.setAttribute("style", bStyle); a.dataset.n = bName; }
+  // 셀 내용을 M 데이터 기반으로 새로 렌더링
+  function renderCell(el, name, keepHead){
+    if(!name){
+      // 공석으로
+      el.className = "vcell";
+      el.dataset.n = "";
+      el.innerHTML = `<div class="vcell-t" style="color:#aaa;">*공석</div>`;
+      el.style.cssText = `border-radius:5px;padding:3px 5px;text-align:center;border:1px dashed #ccc;min-width:58px;min-height:44px;display:flex;align-items:center;justify-content:center;`;
+      return;
+    }
+    const m = M[name]; if(!m) return;
+    const C = tc(name);
+    if(keepHead){
+      el.className = "hc";
+      el.dataset.n = name;
+      el.style.cssText = `background:${C.h};border-color:${C.b};min-width:122px;border-radius:5px;border:1px solid;padding:4px 7px;text-align:center;cursor:pointer;`;
+      el.innerHTML = `<div class="hcn" style="color:${C.t};">${name} ${m.rank}</div><div class="hce" style="color:${C.t};">${m.ext&&m.ext!=="-"?m.ext:""}</div>`;
+    } else {
+      el.className = "c";
+      el.dataset.n = name;
+      el.style.cssText = `background:${C.bg};border-color:${C.b};min-width:58px;border-radius:5px;border:1px solid;padding:3px 5px;text-align:center;cursor:pointer;`;
+      const subBadge = m.sub ? `<div style="font-size:8px;font-weight:600;color:${C.t};opacity:0.7;margin-top:1px;">${m.sub}</div>` : "";
+      el.innerHTML = `<div class="cr" style="color:${C.t};">${m.rank}</div><div class="cn" style="color:${C.t};">${name}</div><div class="ce" style="color:${C.t};">${m.ext&&m.ext!=="-"?m.ext:""}</div>${subBadge}`;
+    }
+  }
 
-  // b ← a 내용
-  b.innerHTML = aHTML;
-  b.dataset.n = aName || "";
-  if(!aName){ b.className = "vcell"; b.setAttribute("style", aStyle); }
-  else { b.className = bClass; b.setAttribute("style", aStyle); b.dataset.n = aName; }
+  // a 자리에 b 사람, b 자리에 a 사람 렌더링
+  renderCell(a, bName, aIsHead);
+  renderCell(b, aName, bIsHead);
 
   // 이벤트 재등록
   enableSeatMove();
@@ -959,6 +985,7 @@ function addMemberSave(){
         newCell.style.cssText = `background:${C.bg};border-color:${C.b};min-width:58px;`;
         newCell.innerHTML = `<div class="cr" style="color:${C.t};">${rank}</div><div class="cn" style="color:${C.t};">${name}</div><div class="ce" style="color:${C.t};">${ext!=="-"?ext:""}</div>`;
         newCell.addEventListener("click", adminCellClick, true);
+    newCell.addEventListener("click", function(e){ if(!isAdmin) showModal(this.dataset.n); });
         vc.replaceWith(newCell);
         placed = true;
         break;
@@ -998,6 +1025,7 @@ function appendToTeam(name, team){
   newCell.style.cssText = `background:${C.bg};border-color:${C.b};min-width:58px;`;
   newCell.innerHTML = `<div class="cr" style="color:${C.t};">${m.rank}</div><div class="cn" style="color:${C.t};">${name}</div><div class="ce" style="color:${C.t};">${m.ext!=="-"?m.ext:""}</div>`;
   newCell.addEventListener("click", adminCellClick, true);
+  newCell.addEventListener("click", function(e){ if(!isAdmin) showModal(this.dataset.n); });
 
   // 마지막 crow에 추가하거나 새 crow 생성
   const rows = targetZone.querySelectorAll(".crow");
