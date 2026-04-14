@@ -859,6 +859,61 @@ function saveTeamNames(){
   showToast(`✅ ${renames.length}개 팀명이 변경되었습니다`);
   closeTeamModal();
 }
+// ── 자리 직접 선택 모드 ──
+let pickingName = null;
+
+function enterPickMode(name){
+  pickingName = name;
+  document.getElementById("editBanner").textContent = `📍 ${name} 자리 선택 중 — 배치할 공석 셀을 클릭하세요 (ESC로 취소)`;
+  document.getElementById("editBanner").style.background = "#2d9e6e";
+  document.querySelectorAll(".vcell").forEach(el=>{
+    el.style.outline = "2px dashed #2d9e6e";
+    el.style.outlineOffset = "1px";
+    el.style.cursor = "pointer";
+    el.addEventListener("click", onPickCell);
+  });
+  document.addEventListener("keydown", onPickEsc);
+  showToast(`📍 배치할 공석 자리를 클릭하세요 (ESC로 취소)`);
+}
+
+function onPickCell(e){
+  e.stopImmediatePropagation();
+  if(!pickingName) return;
+  const name = pickingName;
+  pickingName = null;
+  exitPickMode();
+  const C = tc(name);
+  const m = M[name];
+  const subBadge = m.sub?`<div style="font-size:8px;font-weight:600;color:${C.t};opacity:0.7;margin-top:1px;">${m.sub}</div>`:"";
+  this.className = "c";
+  this.dataset.n = name;
+  this.style.cssText = `background:${C.bg};border-color:${C.b};min-width:58px;border-radius:5px;border:1px solid;padding:3px 5px;text-align:center;cursor:pointer;`;
+  this.innerHTML = `<div class="cr" style="color:${C.t};">${m.rank}</div><div class="cn" style="color:${C.t};">${name}</div><div class="ce" style="color:${C.t};">${m.ext&&m.ext!=="-"?m.ext:""}</div>${subBadge}`;
+  this.addEventListener("click", adminCellClick);
+  enableSeatMove();
+  rebuildLayout();
+  showToast(`✅ ${name} 배치 완료`);
+}
+
+function onPickEsc(e){
+  if(e.key==="Escape"){
+    if(pickingName){ delete M[pickingName]; if(PHOTOS[pickingName]) delete PHOTOS[pickingName]; }
+    pickingName = null;
+    exitPickMode();
+    showToast("취소되었습니다");
+  }
+}
+
+function exitPickMode(){
+  document.getElementById("editBanner").textContent = "✏️ 관리자 편집 모드 — 셀을 클릭하면 수정할 수 있습니다";
+  document.getElementById("editBanner").style.background = "#e05555";
+  document.querySelectorAll(".vcell").forEach(el=>{
+    el.style.outline = "";
+    el.style.cursor = "";
+    el.removeEventListener("click", onPickCell);
+  });
+  document.removeEventListener("keydown", onPickEsc);
+}
 
 // enterAdmin 오버라이드해서 팀명 버튼 표시
 const _prevEnterAdmin = enterAdmin;
@@ -966,7 +1021,12 @@ function addMemberSave(){
 
   closeAddModal();
 
-  if(placement === "vacant"){
+  if(placement === "pick"){
+    // 팝업 닫고 자리 선택 모드 진입
+    closeAddModal();
+    enterPickMode(name);
+    return;
+  } else if(placement === "vacant"){
     // 공석 자리 중 해당 팀과 같은 zone의 첫 번째 vcell에 배치
     const vcells = document.querySelectorAll(".vcell");
     let placed = false;
@@ -1073,6 +1133,7 @@ function appendToTeam(name, team){
       <select class="em-select" id="addPlacement">
         <option value="vacant">해당 팀 공석 자리에 자동 배치</option>
         <option value="append">해당 팀 맨 마지막에 추가</option>
+        <option value="pick">배치도에서 직접 선택</option>
       </select>
     </div>
     <div class="em-row"><div class="em-label">증명사진 (선택)</div>
